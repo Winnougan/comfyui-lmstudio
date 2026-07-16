@@ -51,6 +51,7 @@ Guidance by model type:
 - If you want speed over headroom, check whether your model exposes a way to disable thinking mode (a toggle in LM Studio's model settings, or a chat-template flag) — running without reasoning is both faster and keeps `max_tokens` low and predictable.
 
 ## Sample workflow
+<img width="1228" height="678" alt="2026-07-16_10-18-23" src="https://github.com/user-attachments/assets/96e4fd67-2508-4d89-8e3d-45bd047f257a" />
 
 ```
 LoadImage ──────────────┐
