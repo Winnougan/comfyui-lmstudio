@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-lmstudio"
+description = "Use a local LM Studio server as the LLM/VLM backend in ComfyUI."
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = ["requests>=2.31.0", "Pillow>=9.0.0", "numpy>=1.24.0"]
+
+[project.urls]
+Repository = "https://github.com/Winnougan/comfyui-lmstudio"
+
+[tool.comfy]
+PublisherId = "YOUR_COMFY_REGISTRY_USERNAME"
+DisplayName = "ComfyUI LM Studio"
+Icon = ""
