@@ -13,11 +13,22 @@ Install:
 
 import base64
 import io
-import json
+import time
 
 import numpy as np
 import requests
 from PIL import Image
+
+# Module-level session: TCP keep-alive / connection reuse across queue items.
+_SESSION = requests.Session()
+_SESSION.headers.update({"Accept": "application/json"})
+# (Content-Type is set automatically by requests when using json=payload,
+#  so it's intentionally not set globally here.)
+
+_CONNECT_TIMEOUT = 3       # seconds to establish a TCP connection
+_MODELS_READ_TIMEOUT = 5   # seconds to read the /models response
+_MAX_RETRIES = 3           # attempts for the chat completion request
+_RETRY_BASE_DELAY = 2      # seconds; doubles each retry (2, 4, 8...)
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +87,10 @@ class LMStudioConnection:
         # Fail fast with a clear error instead of a cryptic connection
         # error later at generation time.
         try:
-            resp = requests.get(f"{base_url}/models", timeout=5)
+            resp = _SESSION.get(
+                f"{base_url}/models",
+                timeout=(_CONNECT_TIMEOUT, _MODELS_READ_TIMEOUT),
+            )
             resp.raise_for_status()
             available = [m["id"] for m in resp.json().get("data", [])]
         except Exception as e:
@@ -87,12 +101,13 @@ class LMStudioConnection:
                 f"Underlying error: {e}"
             )
 
+        # Warn instead of raising: LM Studio's JIT loading can load an
+        # unloaded model on demand, so "not currently loaded" is not fatal.
         if model and available and model not in available:
-            raise RuntimeError(
-                f"Model '{model}' is not currently loaded in LM Studio. "
-                f"Loaded models: {available}. "
-                f"Either load '{model}' in LM Studio, or leave the "
-                f"'model' field blank to use whatever is loaded."
+            print(
+                f"[LM Studio] WARNING: model '{model}' is not currently "
+                f"loaded. Loaded models: {available}. LM Studio will try to "
+                "JIT-load it if enabled; otherwise the request will fail."
             )
 
         connection = {
@@ -109,9 +124,18 @@ class LMStudioConnection:
 # ---------------------------------------------------------------------------
 class LMStudioGenerateText:
     """
-    Sends a chat completion request to LM Studio's OpenAI-compatible API.
-    Supports an optional image input for vision models (sent as a base64
-    data URL, same convention OpenAI's vision API uses).
+    Sends chat completion request(s) to LM Studio's OpenAI-compatible API.
+    Supports an optional image input for vision models. If a batch of
+    images is provided, one request is sent PER IMAGE in the batch and the
+    resulting captions are joined with the configured separator — matching
+    the behavior of one caption per image rather than only captioning the
+    first frame of a batch.
+
+    Images are downscaled to `max_image_size` and sent as JPEG by default:
+    JPEG encodes ~5-10x faster than PNG and produces a far smaller payload,
+    and the smaller resolution also reduces image token count (and thus
+    prompt-processing time) server-side. Switch image_format to "png" for
+    lossless transmission of text-heavy / pixel-exact images.
     """
 
     @classmethod
@@ -121,10 +145,7 @@ class LMStudioGenerateText:
                 "connection": ("LM_STUDIO_CONNECTION",),
                 "prompt": (
                     "STRING",
-                    {
-                        "default": "Describe this image.",
-                        "multiline": True,
-                    },
+                    {"default": "Describe this image.", "multiline": True},
                 ),
                 "max_tokens": ("INT", {"default": 500, "min": 1, "max": 8192}),
                 "temperature": (
@@ -143,6 +164,39 @@ class LMStudioGenerateText:
                     "STRING",
                     {"default": "", "multiline": True},
                 ),
+                "max_image_size": (
+                    "INT",
+                    {
+                        "default": 1024,
+                        "min": 256,
+                        "max": 4096,
+                        "step": 64,
+                        "tooltip": "Images are downscaled so their longest "
+                        "side is at most this many pixels before sending. "
+                        "Most VLMs resize internally anyway, so larger "
+                        "values mostly cost latency, not quality.",
+                    },
+                ),
+                "image_format": (
+                    ["jpeg", "png"],
+                    {
+                        "default": "jpeg",
+                        "tooltip": "jpeg: ~10x faster encode, ~10x smaller "
+                        "payload. png: lossless, better for pixel-exact or "
+                        "text-heavy images.",
+                    },
+                ),
+                "batch_separator": (
+                    "STRING",
+                    {
+                        "default": "\n\n",
+                        "multiline": False,
+                        "tooltip": "When `image` is a batch of more than "
+                        "one image, each image gets its own request and "
+                        "the resulting captions are joined with this "
+                        "string.",
+                    },
+                ),
             },
         }
 
@@ -153,40 +207,86 @@ class LMStudioGenerateText:
 
     # -- helpers -------------------------------------------------------
     @staticmethod
-    def _tensor_to_data_url(image_tensor):
-        """ComfyUI IMAGE tensors are [B,H,W,C] float32 0-1. Take the first
-        image in the batch and encode it as a base64 PNG data URL."""
-        arr = image_tensor[0].cpu().numpy()
-        arr = np.clip(arr * 255.0, 0, 255).astype(np.uint8)
+    def _tensor_to_data_url(single_image_tensor, max_image_size, image_format):
+        """Takes a single [H,W,C] float32 0-1 image tensor, downscales, and
+        encodes it as a base64 data URL."""
+        arr = single_image_tensor.cpu().numpy()
+        arr = np.clip(np.rint(arr * 255.0), 0, 255).astype(np.uint8)
         img = Image.fromarray(arr)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{b64}"
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
-    # -- main ------------------------------------------------------------
-    def generate(
+        if max_image_size and max(img.size) > max_image_size:
+            img.thumbnail(
+                (max_image_size, max_image_size), Image.Resampling.LANCZOS
+            )
+
+        buf = io.BytesIO()
+        if image_format == "png":
+            img.save(buf, format="PNG")
+            mime = "image/png"
+        else:
+            img.save(buf, format="JPEG", quality=87)
+            mime = "image/jpeg"
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    @staticmethod
+    def _post_with_retry(base_url, api_key, payload, timeout):
+        """POST to /chat/completions with basic retry on transient network
+        errors. Does NOT retry on HTTP error responses (4xx/5xx) from LM
+        Studio itself, since those are almost always deterministic (bad
+        payload, context overflow, model not found) and retrying won't help."""
+        last_error = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                resp = _SESSION.post(
+                    f"{base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json=payload,
+                    timeout=(_CONNECT_TIMEOUT, timeout),
+                )
+                return resp
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                    print(
+                        f"[LM Studio] Request failed (attempt "
+                        f"{attempt + 1}/{_MAX_RETRIES}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    time.sleep(delay)
+        raise RuntimeError(
+            f"LM Studio request failed after {_MAX_RETRIES} attempts: "
+            f"{last_error}"
+        )
+
+    def _generate_one(
         self,
-        connection,
+        base_url,
+        model,
+        api_key,
+        timeout,
         prompt,
         max_tokens,
         temperature,
         top_p,
         seed,
-        image=None,
-        system_prompt="",
+        system_prompt,
+        image_tensor,
+        max_image_size,
+        image_format,
     ):
-        base_url = connection["base_url"]
-        model = connection["model"]
-        api_key = connection["api_key"]
-        timeout = connection.get("timeout", 120)
-
+        """Runs a single chat completion request and returns the text."""
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
 
-        if image is not None:
-            data_url = self._tensor_to_data_url(image)
+        if image_tensor is not None:
+            data_url = self._tensor_to_data_url(
+                image_tensor, max_image_size, image_format
+            )
             user_content = [
                 {"type": "text", "text": prompt},
                 {"type": "image_url", "image_url": {"url": data_url}},
@@ -202,28 +302,19 @@ class LMStudioGenerateText:
             "max_tokens": max_tokens,
             "temperature": temperature,
             "top_p": top_p,
+            "seed": seed,  # always send — `if seed:` would silently drop seed=0
             "stream": False,
         }
-        # LM Studio accepts a seed for reproducibility on many backends;
-        # harmless to omit if unsupported.
-        if seed:
-            payload["seed"] = seed
 
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        resp = self._post_with_retry(base_url, api_key, payload, timeout)
 
-        try:
-            resp = requests.post(
-                f"{base_url}/chat/completions",
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=timeout,
+        # Surface LM Studio's own error message (context overflow, image too
+        # large, model not loaded, ...) instead of a bare status code.
+        if not resp.ok:
+            raise RuntimeError(
+                f"LM Studio returned HTTP {resp.status_code}: "
+                f"{resp.text[:500]}"
             )
-            resp.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"LM Studio request failed: {e}")
 
         data = resp.json()
         try:
@@ -257,7 +348,50 @@ class LMStudioGenerateText:
                     f"Full response: {data}"
                 )
 
-        return (text,)
+        return text
+
+    # -- main ------------------------------------------------------------
+    def generate(
+        self,
+        connection,
+        prompt,
+        max_tokens,
+        temperature,
+        top_p,
+        seed,
+        image=None,
+        system_prompt="",
+        max_image_size=1024,
+        image_format="jpeg",
+        batch_separator="\n\n",
+    ):
+        base_url = connection["base_url"]
+        model = connection["model"]
+        api_key = connection["api_key"]
+        timeout = connection.get("timeout", 120)
+
+        # No image: single text-only request.
+        if image is None:
+            text = self._generate_one(
+                base_url, model, api_key, timeout,
+                prompt, max_tokens, temperature, top_p, seed,
+                system_prompt, None, max_image_size, image_format,
+            )
+            return (text,)
+
+        # Image batch: one request PER image in the batch tensor [B,H,W,C].
+        batch_size = image.shape[0]
+        results = []
+        for i in range(batch_size):
+            print(f"[LM Studio] Captioning image {i + 1}/{batch_size}...")
+            text = self._generate_one(
+                base_url, model, api_key, timeout,
+                prompt, max_tokens, temperature, top_p, seed,
+                system_prompt, image[i], max_image_size, image_format,
+            )
+            results.append(text)
+
+        return (batch_separator.join(results),)
 
 
 NODE_CLASS_MAPPINGS = {
