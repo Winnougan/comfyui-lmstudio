@@ -1,0 +1,269 @@
+{
+  "id": "4d30d509-80e1-4156-ad1d-4e2de2d8dda8",
+  "revision": 0,
+  "last_node_id": 13,
+  "last_link_id": 12,
+  "nodes": [
+    {
+      "id": 4,
+      "type": "ShowText|pysssss",
+      "pos": [
+        6109.9170605245845,
+        666.5666294299283
+      ],
+      "size": [
+        468.46875,
+        530.90625
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-custom-scripts",
+        "ver": "1.2.5",
+        "Node name for S&R": "ShowText|pysssss",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "The image is a medium, indoor portrait featuring a young woman with long, straight black hair sitting on a sofa.\n\n**Subject and Appearance:**\nShe has fair skin and wears dark eye makeup, giving her look a slightly dramatic or pensive quality. Her expression is neutral as she gazes toward the camera. She is dressed in layers: an oversized, chunky grey sweater that features ribbed cuffs and hem sections in a contrasting darker brown color. Visible beneath the loose sweater is a black lace-up camisole or bra top. She pairs this with light wash denim shorts that have distressed, frayed edges.\n\n**Setting and Composition:**\nThe woman is seated on a dark grey sofa, which fills much of the background behind her. The lighting is soft and diffused, suggesting an indoor setting. In the blurred background to the right, there is a small wooden surface where a white mug (likely containing coffee or tea) is visible.\n\n**Overall Impression:**\nThe image has a casual yet styled aesthetic, blending cozy elements like the oversized sweater with edgier pieces such as the denim shorts and black camisole. The color palette is dominated by shades of grey, black, and dark brown."
+      ]
+    },
+    {
+      "id": 5,
+      "type": "SaveText|pysssss",
+      "pos": [
+        6094.881958792779,
+        385.00357923210413
+      ],
+      "size": [
+        461.5692588418706,
+        208.046875
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-custom-scripts",
+        "ver": "1.2.5",
+        "Node name for S&R": "SaveText|pysssss",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "output",
+        "049.txt",
+        "append",
+        false
+      ]
+    },
+    {
+      "id": 10,
+      "type": "LMStudioConnection",
+      "pos": [
+        5124.738327474074,
+        443.28694064754603
+      ],
+      "size": [
+        270,
+        130
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "connection",
+          "type": "LM_STUDIO_CONNECTION",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMStudioConnection"
+      },
+      "widgets_values": [
+        "http://localhost:1234/v1",
+        "",
+        "lm-studio",
+        120
+      ]
+    },
+    {
+      "id": 11,
+      "type": "LMStudioGenerateText",
+      "pos": [
+        5613.172722838211,
+        585.210506240032
+      ],
+      "size": [
+        400,
+        282
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "connection",
+          "type": "LM_STUDIO_CONNECTION",
+          "link": 8
+        },
+        {
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "generated_text",
+          "type": "STRING",
+          "links": [
+            9,
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LMStudioGenerateText"
+      },
+      "widgets_values": [
+        "Describe this image.",
+        8000,
+        0.7,
+        0.95,
+        1511085197,
+        "randomize",
+        ""
+      ]
+    },
+    {
+      "id": 13,
+      "type": "LoadImage",
+      "pos": [
+        5074.222142527752,
+        739.4794410434322
+      ],
+      "size": [
+        282.798828125,
+        314
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            12
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.28.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "Astrochan_Krea2_0076.webp",
+        "image"
+      ]
+    }
+  ],
+  "links": [
+    [
+      8,
+      10,
+      0,
+      11,
+      0,
+      "LM_STUDIO_CONNECTION"
+    ],
+    [
+      9,
+      11,
+      0,
+      5,
+      0,
+      "STRING"
+    ],
+    [
+      10,
+      11,
+      0,
+      4,
+      0,
+      "STRING"
+    ],
+    [
+      12,
+      13,
+      0,
+      11,
+      1,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8390545288824471,
+      "offset": [
+        -4795.670955238907,
+        -127.15025556615251
+      ]
+    },
+    "frontendVersion": "1.45.21",
+    "ue_links": [],
+    "links_added_by_ue": [],
+    "anomalous_hashes": {}
+  },
+  "version": 0.4
+}
