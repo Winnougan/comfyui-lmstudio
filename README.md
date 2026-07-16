@@ -1,4 +1,5 @@
 # ComfyUI LM Studio Nodes
+<img width="1536" height="1024" alt="Winnougan&#39;s LM Nodes 01" src="https://github.com/user-attachments/assets/5feb8199-3bb9-44ae-b383-7a043b82d855" />
 
 Use a local [LM Studio](https://lmstudio.ai/) server as the LLM/VLM backend inside ComfyUI — a drop-in replacement for the built-in `CLIPLoader` → `TextGenerate` pair, useful for local image captioning (e.g. building LoRA training datasets) or general text generation, with no API keys or cloud calls required.
 
